@@ -64,7 +64,10 @@ module.exports = {
       },
       {
         version: "0.6.12", // To support IWeth.sol
-      }
+      },
+      {
+        version: "0.8.3", // To support IWeth.sol
+      },
     ],
   }
 };
