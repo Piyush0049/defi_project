@@ -14,20 +14,59 @@ async function getLendingPool() {
 }
 
 async function main() {
+  console.log("Script getting started...");
   await getWeth();
+
   const { deployer } = await getNamedAccounts();
   const lendingPool = await getLendingPool();
   console.log("Lending Pool address: ", lendingPool.target);
+
   const wethAddress = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
+
+  // Approve lending pool to take WETH
   await approveErc20(wethAddress, amount, lendingPool.target, deployer);
   console.log("Depositing...");
   await lendingPool.deposit(wethAddress, amount, deployer, 0);
   console.log("Deposited!");
+
+  // Check user account data
   let { totalDebtETH, availableBorrowsETH } = await getBorrowUserData(
     deployer,
     lendingPool
   );
-  await getDaiPrice();
+
+  const daiPrice = await getDaiPrice(); // price in ETH
+  const daiPriceInETH = BigInt(daiPrice.toString());
+  const borrowableEth = BigInt(availableBorrowsETH.toString());
+
+  // Borrow 95% of available ETH worth of DAI
+  const amountDaiToBorrow = (borrowableEth * 95n) / (100n * daiPriceInETH);
+  const amountDaiToBorrowWei = amountDaiToBorrow * 10n ** 18n;
+
+  console.log("The DAI available to be borrowed (wei): ", amountDaiToBorrowWei.toString());
+
+  // Check for minimum borrow requirement
+  if (amountDaiToBorrowWei < ethers.parseUnits("1", 18)) {
+    console.log("Amount too small to borrow. Try depositing more WETH.");
+    return;
+  }
+
+  // Borrow DAI
+  await borrowDai(
+    "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI address
+    ILendingPool,
+    deployer,
+    amountDaiToBorrowWei
+  );
+
+  await getBorrowUserData(deployer, lendingPool);
+}
+
+async function borrowDai(daiAddress, ILendingPool, account, amount) {
+  console.log("Borrowing amount (wei):", amount.toString());
+  const tx = await ILendingPool.borrow(daiAddress, amount, 1, 0, account); // interestRateMode = 1 (stable)
+  await tx.wait(1);
+  console.log("You have borrowed DAI!");
 }
 
 async function getDaiPrice() {
@@ -37,7 +76,7 @@ async function getDaiPrice() {
   );
   const res = await daiEthPriceFeed.latestRoundData();
   console.log("The DAI/ETH price is : ", res[1].toString());
-  return res[1];
+  return res[1]; // returns price as BigNumber
 }
 
 async function getBorrowUserData(account, lendingPool) {
@@ -49,14 +88,8 @@ async function getBorrowUserData(account, lendingPool) {
   return { totalDebtETH, availableBorrowsETH };
 }
 
-async function approveErc20(
-  erc20Address,
-  amountToSpend,
-  spenderAddress,
-  account
-) {
+async function approveErc20(erc20Address, amountToSpend, spenderAddress, account) {
   const erc20Token = await ethers.getContractAt("IERC20", erc20Address);
-
   const tx = await erc20Token.approve(spenderAddress, amountToSpend);
   await tx.wait(1);
   console.log("Approved!");
@@ -65,5 +98,6 @@ async function approveErc20(
 main()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.log(error);
+    console.error(error);
+    process.exit(1);
   });
